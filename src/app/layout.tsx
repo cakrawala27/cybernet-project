@@ -15,6 +15,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://cybernet-project.vercel.app"),
   title: "Leeyork — Cybernet Project | Jasa Pembuatan Website & Web App",
   description:
     "Portofolio Leeyork (Cybernet Project), web developer dari Solok, Sumatera Barat. Jasa pembuatan landing page, company profile, toko online, aplikasi masjid, aplikasi kantor, aplikasi pembelajaran CERDASIA, dan web app custom. Coba demo interaktifnya langsung di website.",
@@ -40,6 +41,21 @@ export const metadata: Metadata = {
       "Ubah ide jadi web app yang cepat & modern. Coba demo interaktif langsung di website.",
     siteName: "Cybernet Project",
     type: "website",
+    images: [
+      {
+        url: "/images/og-cybernet.png",
+        width: 1200,
+        height: 630,
+        alt: "Cybernet Project — Jasa Pembuatan Website & Web App",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Leeyork — Cybernet Project | Jasa Pembuatan Website & Web App",
+    description:
+      "Ubah ide jadi web app yang cepat & modern. Coba demo interaktif langsung di website.",
+    images: ["/images/og-cybernet.png"],
   },
 };
 

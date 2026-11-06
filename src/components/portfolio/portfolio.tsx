@@ -38,6 +38,7 @@ const projects: {
   icon: typeof Store
   grad: string
   tags: string[]
+  img?: string
   hasDemo?: boolean
   href?: string
 }[] = [
@@ -48,7 +49,8 @@ const projects: {
     url: 'arena27.my.id',
     icon: Newspaper,
     grad: 'from-orange-500/25 via-amber-500/10 to-zinc-900',
-    tags: ['Next.js', 'SEO', 'CMS'],
+    tags: ['Next.js', 'SEO', 'Iklan'],
+    img: '/images/portfolio/arena27.jpg',
     hasDemo: true,
     href: 'https://arena27.my.id/',
   },
@@ -60,6 +62,7 @@ const projects: {
     icon: Globe,
     grad: 'from-orange-600/25 via-red-500/10 to-zinc-900',
     tags: ['Next.js', 'PWA', 'SEO'],
+    img: '/images/portfolio/pro1media.jpg',
     href: 'https://pro1media.com/',
   },
   {
@@ -98,6 +101,7 @@ const projects: {
     icon: GraduationCap,
     grad: 'from-yellow-400/25 via-amber-500/10 to-zinc-900',
     tags: ['Next.js', 'Prisma', 'Multi-user'],
+    img: '/images/portfolio/cerdasia.jpg',
     hasDemo: true,
   },
   {
@@ -212,7 +216,17 @@ export function Portfolio() {
                 <div
                   className={`relative mx-0 mt-3 flex h-40 items-center justify-center bg-gradient-to-br ${p.grad}`}
                 >
-                  <p.icon className="size-14 text-zinc-200/80 transition-transform duration-300 group-hover:scale-110" />
+                  {p.img ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={p.img}
+                      alt={p.title}
+                      loading="lazy"
+                      className="absolute inset-0 size-full object-cover object-top transition-transform duration-500 group-hover:scale-105"
+                    />
+                  ) : (
+                    <p.icon className="size-14 text-zinc-200/80 transition-transform duration-300 group-hover:scale-110" />
+                  )}
                   {p.href ? (
                     <Badge className="absolute right-3 top-3 border-orange-500/40 bg-orange-500/20 text-[10px] text-orange-200">
                       Project Live
