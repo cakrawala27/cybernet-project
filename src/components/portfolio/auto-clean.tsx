@@ -4,9 +4,12 @@ import { useState } from 'react'
 import {
   Check,
   Copy,
+  Download,
+  FileDown,
   FileText,
   Link2,
   Loader2,
+  Share2,
   Sparkles,
   Wand2,
 } from 'lucide-react'
@@ -49,6 +52,16 @@ export function AutoClean() {
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<CleanResult | null>(null)
   const [copied, setCopied] = useState<string | null>(null)
+  const [exporting, setExporting] = useState<'pdf' | 'docx' | 'share' | null>(null)
+  const [pdfFile, setPdfFile] = useState<{ blob: Blob; nama: string } | null>(null)
+
+  const slugify = (s: string) =>
+    s
+      .toLowerCase()
+      .normalize('NFKD')
+      .replace(/[^\p{L}\p{N}]+/gu, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 60) || 'artikel'
 
   const salin = async (key: string, text: string) => {
     const ok = await copyText(text)
@@ -65,6 +78,7 @@ export function AutoClean() {
     setLoading(true)
     setError(null)
     setResult(null)
+    setPdfFile(null)
     try {
       const payload = pasteMode ? { html } : { url }
       const res = await fetch('/api/auto-clean', {
@@ -82,6 +96,94 @@ export function AutoClean() {
       setError('Gagal terhubung ke server. Coba lagi.')
     } finally {
       setLoading(false)
+    }
+  }
+
+  /** Simpan blob sebagai file di browser user. */
+  const simpanBlob = (blob: Blob, nama: string) => {
+    const objUrl = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = objUrl
+    a.download = nama
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(objUrl), 4000)
+  }
+
+  /** Minta server bikin PDF/DOCX (gambar di-embed) lalu unduh. */
+  const buatFile = async (kind: 'pdf' | 'docx'): Promise<{ blob: Blob; nama: string } | null> => {
+    if (!result) return null
+    const res = await fetch(`/api/auto-clean/export-${kind}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: result.title,
+        images: result.images.map((i) => i.src),
+        paragraphs: includeText ? result.textParagraphs : [],
+        sourceUrl: result.sourceUrl || '',
+      }),
+    })
+    if (!res.ok) {
+      const data = (await res.json().catch(() => null)) as { error?: string } | null
+      throw new Error(data?.error || `Server menjawab HTTP ${res.status}`)
+    }
+    const blob = await res.blob()
+    const nama = `${slugify(result.title)}.${kind}`
+    return { blob, nama }
+  }
+
+  const unduh = async (kind: 'pdf' | 'docx') => {
+    setExporting(kind)
+    try {
+      const file = await buatFile(kind)
+      if (file) {
+        simpanBlob(file.blob, file.nama)
+        if (kind === 'pdf') setPdfFile(file)
+        toast({ title: `File ${kind.toUpperCase()} siap! 📄`, description: file.nama })
+      }
+    } catch (e) {
+      toast({
+        title: `Gagal membuat ${kind.toUpperCase()} ❌`,
+        description: e instanceof Error ? e.message : 'Coba lagi ya.',
+      })
+    } finally {
+      setExporting(null)
+    }
+  }
+
+  /** Bagikan PDF via Web Share API (WA/Telegram/dll di HP) — fallback: share link. */
+  const bagikan = async () => {
+    setExporting('share')
+    try {
+      let file = pdfFile
+      if (!file) {
+        file = await buatFile('pdf')
+        if (file) setPdfFile(file)
+      }
+      if (file && typeof navigator.canShare === 'function') {
+        const f = new File([file.blob], file.nama, { type: 'application/pdf' })
+        if (navigator.canShare({ files: [f] })) {
+          await navigator.share({ files: [f], title: result?.title || 'Artikel' })
+          return
+        }
+      }
+      if (file) {
+        simpanBlob(file.blob, file.nama)
+        toast({
+          title: 'PDF sudah diunduh 📄',
+          description: 'Browser ini belum dukung share file langsung — lampirkan manual ke chat.',
+        })
+      }
+    } catch (e) {
+      // AbortError = user menutup dialog share — bukan error
+      if (e instanceof DOMException && e.name === 'AbortError') return
+      toast({
+        title: 'Gagal membagikan ❌',
+        description: e instanceof Error ? e.message : 'Coba unduh manual ya.',
+      })
+    } finally {
+      setExporting(null)
     }
   }
 
@@ -206,9 +308,12 @@ export function AutoClean() {
                   <p className="text-xs font-semibold uppercase tracking-widest text-zinc-500">
                     Judul Artikel
                   </p>
-                  <h3 className="mt-2 text-lg font-bold leading-snug text-zinc-100">
+                  <h3 className="mt-2 text-2xl font-bold leading-snug text-zinc-100">
                     {result.title}
                   </h3>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    Format H1 32px bold — ukurannya ikut saat ditempel / di-export.
+                  </p>
                 </div>
                 <Button
                   size="sm"
@@ -221,6 +326,61 @@ export function AutoClean() {
                 </Button>
               </div>
             </div>
+
+            {/* tombol export: PDF / DOCX / Share */}
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Button
+                onClick={() => unduh('pdf')}
+                disabled={exporting !== null}
+                className="bg-orange-500 font-semibold text-zinc-950 hover:bg-orange-400"
+              >
+                {exporting === 'pdf' ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" /> Menyusun PDF…
+                  </>
+                ) : (
+                  <>
+                    <Download className="size-4" /> Unduh PDF
+                  </>
+                )}
+              </Button>
+              <Button
+                onClick={() => unduh('docx')}
+                disabled={exporting !== null}
+                variant="outline"
+                className="border-zinc-700 font-semibold text-zinc-200 hover:text-orange-400"
+              >
+                {exporting === 'docx' ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" /> Menyusun DOCX…
+                  </>
+                ) : (
+                  <>
+                    <FileDown className="size-4" /> Unduh DOCX
+                  </>
+                )}
+              </Button>
+              <Button
+                onClick={bagikan}
+                disabled={exporting !== null}
+                variant="outline"
+                className="border-zinc-700 font-semibold text-zinc-200 hover:text-orange-400"
+              >
+                {exporting === 'share' ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" /> Menyiapkan…
+                  </>
+                ) : (
+                  <>
+                    <Share2 className="size-4" /> Bagikan
+                  </>
+                )}
+              </Button>
+            </div>
+            <p className="text-center text-[11px] text-zinc-600">
+              PDF &amp; DOCX berisi judul berukuran + semua gambar artikel (di-embed, tetap utuh
+              saat di-share ke WA/Telegram). Bagikan = kirim PDF langsung ke aplikasi chat di HP.
+            </p>
 
             {/* tombol salin massal */}
             <div className="flex flex-col gap-3 sm:flex-row">

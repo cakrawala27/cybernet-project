@@ -9,6 +9,8 @@ export type CleanResult = {
   images: CleanedImage[]
   htmlImages: string
   contentHtml: string
+  /** Paragraf teks bersih (untuk opsi "sertakan teks" & export PDF/DOCX). */
+  textParagraphs: string[]
   sourceUrl?: string
 }
 
@@ -85,6 +87,37 @@ function isJunkImage(src: string, alt: string): boolean {
   return IMG_JUNK_RE.test(src) || (alt.length > 0 && IMG_JUNK_RE.test(alt))
 }
 
+/** Kunci dedupe gambar: buang query, dan untuk og-generator/optimizer ikuti gambar asalnya. */
+function imgKey(src: string, base?: string): string {
+  try {
+    const u = new URL(src, base)
+    // og dynamic image / next optimizer: gambar asal ada di query (src|url|image)
+    for (const p of ['src', 'url', 'image']) {
+      const q = u.searchParams.get(p)
+      if (q && (q.startsWith('/') || /^https?:/i.test(q))) {
+        try {
+          return new URL(q, u).origin + new URL(q, u).pathname
+        } catch {
+          /* lanjut */
+        }
+      }
+    }
+    return u.origin + u.pathname
+  } catch {
+    return src.split('#')[0]
+  }
+}
+
+/** og-generator = gambar overlay judul (mis. /api/og?src=...) — bukan foto artikel asli. */
+function isOgWrapper(src: string, base?: string): boolean {
+  try {
+    const u = new URL(src, base)
+    return /(api\/og|og-image|ogimage|\/og\?)/i.test(u.pathname + u.search)
+  } catch {
+    return false
+  }
+}
+
 function imgSizeAttr(img: Element): number {
   const w = Number.parseInt(img.getAttribute('width') || '0', 10) || 0
   const h = Number.parseInt(img.getAttribute('height') || '0', 10) || 0
@@ -110,7 +143,7 @@ function collectImages(doc: Document, base?: string): CleanedImage[] {
     // gambar kecil eksplisit (ikon/emoji) — buang
     const size = imgSizeAttr(img)
     if (size > 0 && size < 80) return
-    const key = src.split('#')[0]
+    const key = imgKey(src, base)
     if (seen.has(key)) return
     seen.add(key)
     out.push({ src, alt })
@@ -199,33 +232,56 @@ export function cleanArticle(input: {
     if (!el.textContent?.trim() && !el.querySelector('img')) el.remove()
   })
 
-  // 7. Gabungkan gambar konten + fallback DOM awal (dedupe, urut sesuai dokumen)
+  // 7. Gabungkan gambar konten + fallback DOM awal (dedupe cerdas: og-overlay vs foto asli)
   const merged: CleanedImage[] = []
-  const seen = new Set<string>()
+  const keyIdx = new Map<string, number>()
   for (const img of [...collectImages(contentDom.window.document, baseUrl), ...preCleanImages]) {
-    const key = img.src.split('#')[0]
-    if (seen.has(key)) continue
-    seen.add(key)
-    merged.push(img)
+    const key = imgKey(img.src, baseUrl)
+    const ogWrap = isOgWrapper(img.src, baseUrl)
+    const idx = keyIdx.get(key)
+    if (idx === undefined) {
+      keyIdx.set(key, merged.length)
+      merged.push(img)
+      continue
+    }
+    // sudah ada: og-overlay kalah dari foto asli
+    if (ogWrap && !isOgWrapper(merged[idx].src, baseUrl)) continue
+    if (!ogWrap && isOgWrapper(merged[idx].src, baseUrl)) merged[idx] = img
   }
 
-  // 8. Tentukan gambar utama: lead image Readability → og:image → gambar pertama
+  // 8. Tentukan gambar utama: lead image Readability → og:image → gambar pertama.
+  //    Kalau kandidatnya og-overlay tapi ada foto asli, pakai foto asli.
   const leadImage = resolveUrl(article.lead_image_url, baseUrl)
-  const mainImage = leadImage || ogImage || merged[0]?.src || null
+  const kandidat = [leadImage, ogImage, merged[0]?.src || null].filter(Boolean) as string[]
+  let mainImage = kandidat[0] || null
+  if (mainImage && isOgWrapper(mainImage, baseUrl)) {
+    const asli = merged.find((i) => !isOgWrapper(i.src, baseUrl))
+    if (asli) mainImage = asli.src
+  }
   if (mainImage) {
     const idx = merged.findIndex((i) => i.src === mainImage)
     if (idx > 0) merged.splice(idx, 1)
     if (idx !== 0) merged.unshift({ src: mainImage, alt: 'Gambar utama artikel' })
   }
 
-  // 9. Hasil: judul + semua gambar (tanpa teks)
+  // 9. Paragraf teks bersih (opsional: disertakan di PDF/DOCX kalau user aktifkan)
+  const textParagraphs = Array.from(contentDoc.querySelectorAll('p'))
+    .map((p) => (p.textContent || '').replace(/\s+/g, ' ').trim())
+    .filter((t) => t.length > 1)
+    .slice(0, 300)
+
+  // 10. Hasil: judul DENGAN UKURAN (inline style → terbawa saat ditempel ke editor/Word) + semua gambar
   const title = (article.title || '').trim() || 'Tanpa Judul'
   const imgsHtml = merged
-    .map((i) => `<img src="${i.src}" alt="${escapeHtml(i.alt || 'Gambar artikel')}" />`)
+    .map(
+      (i) =>
+        `<img src="${i.src}" alt="${escapeHtml(i.alt || 'Gambar artikel')}" style="max-width:100%;height:auto;display:block;margin:16px auto;" />`,
+    )
     .join('\n')
-  const htmlImages = `<h1>${escapeHtml(title)}</h1>\n${imgsHtml}`
+  const htmlImages =
+    `<h1 style="font-size:32px;line-height:1.3;font-weight:700;margin:0 0 20px 0;">${escapeHtml(title)}</h1>\n${imgsHtml}`
 
-  // 10. Artikel utuh (teks + gambar) — opsional di UI
+  // 11. Artikel utuh (teks + gambar) — opsional di UI
   const contentHtml = contentDoc.body.innerHTML.trim()
 
   return {
@@ -234,6 +290,7 @@ export function cleanArticle(input: {
     images: merged.slice(0, 40),
     htmlImages,
     contentHtml,
+    textParagraphs,
     sourceUrl: baseUrl,
   }
 }
