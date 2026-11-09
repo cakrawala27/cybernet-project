@@ -1,4 +1,5 @@
 import sharp from 'sharp'
+import { JSDOM } from 'jsdom'
 
 export type ImageAsset = {
   url: string
@@ -94,5 +95,126 @@ export type ExportBody = {
   title?: string
   images?: string[]
   paragraphs?: string[]
+  contentHtml?: string
   sourceUrl?: string
+}
+
+/** Kunci dedupe gambar (path tanpa query; og-generator/optimizer diikuti gambar asalnya). */
+export function imgKeyPath(src: string): string {
+  try {
+    const u = new URL(src)
+    for (const p of ['src', 'url', 'image']) {
+      const q = u.searchParams.get(p)
+      if (q && (q.startsWith('/') || /^https?:/i.test(q))) {
+        try {
+          return new URL(q, u).origin + new URL(q, u).pathname
+        } catch {
+          /* lanjut */
+        }
+      }
+    }
+    return u.origin + u.pathname
+  } catch {
+    return src
+  }
+}
+
+export type ContentItem =
+  | { type: 'h'; text: string }
+  | { type: 'p'; text: string }
+  | { type: 'img'; src: string }
+
+function bersihkanTeks(t: string | null | undefined): string {
+  return (t || '').replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * Parse contentHtml artikel bersih → urutan item alami:
+ * subjudul, paragraf, gambar (tepat di posisinya, bukan semua gambar di akhir).
+ */
+export function parseContentHtml(contentHtml: string, judulUtama: string): ContentItem[] {
+  if (!contentHtml.trim()) return []
+  const dom = new JSDOM(`<body><div id="root">${contentHtml}</div></body>`)
+  const root = dom.window.document.getElementById('root')
+  if (!root) return []
+
+  const items: ContentItem[] = []
+
+  function pushImgsDalam(el: Element) {
+    el.querySelectorAll('img').forEach((img) => {
+      const src = img.getAttribute('src')
+      if (src && /^https?:\/\//i.test(src)) items.push({ type: 'img', src })
+    })
+  }
+
+  function prosesBlock(el: Element) {
+    // punya sub-block → telusuri isi, jangan ambil textContent gabungan
+    const adaSubBlock = el.querySelector(
+      'p, div, ul, ol, li, blockquote, figure, h1, h2, h3, h4, h5, h6, table',
+    )
+    if (adaSubBlock) {
+      el.childNodes.forEach((node) => {
+        if (node.nodeType === 3) {
+          const t = bersihkanTeks(node.textContent)
+          if (t) items.push({ type: 'p', text: t })
+          return
+        }
+        if (node.nodeType !== 1) return
+        const e = node as Element
+        if (e.tagName === 'IMG') {
+          const src = e.getAttribute('src')
+          if (src && /^https?:\/\//i.test(src)) items.push({ type: 'img', src })
+        } else if (/^H[2-6]$/.test(e.tagName)) {
+          const t = bersihkanTeks(e.textContent)
+          if (t) items.push({ type: 'h', text: t })
+          pushImgsDalam(e)
+        } else if (e.tagName === 'H1') {
+          const t = bersihkanTeks(e.textContent)
+          if (t && t !== bersihkanTeks(judulUtama)) items.push({ type: 'h', text: t })
+        } else {
+          prosesBlock(e)
+        }
+      })
+      return
+    }
+
+    // leaf block: teks utuh + gambar di dalamnya
+    const tag = el.tagName
+    const t = bersihkanTeks(el.textContent)
+    if (tag === 'UL' || tag === 'OL') {
+      el.querySelectorAll(':scope > li').forEach((li) => {
+        const lt = bersihkanTeks(li.textContent)
+        if (lt) items.push({ type: 'p', text: `• ${lt}` })
+        pushImgsDalam(li)
+      })
+      return
+    }
+    if (t && (tag === 'H2' || tag === 'H3' || tag === 'H4' || tag === 'H5' || tag === 'H6')) {
+      items.push({ type: 'h', text: t })
+    } else if (t) {
+      items.push({ type: 'p', text: t })
+    }
+    pushImgsDalam(el)
+  }
+
+  // telusuri anak root: img polos, elemen block, dan teks lepas
+  root.childNodes.forEach((node) => {
+    if (node.nodeType === 1) {
+      const e = node as Element
+      if (e.tagName === 'IMG') {
+        const src = e.getAttribute('src')
+        if (src && /^https?:\/\//i.test(src)) items.push({ type: 'img', src })
+        return
+      }
+      prosesBlock(e)
+      return
+    }
+    if (node.nodeType === 3) {
+      const t = bersihkanTeks(node.textContent)
+      if (t) items.push({ type: 'p', text: t })
+    }
+  })
+
+  // buang p kosong beruntun & batasi
+  return items.slice(0, 600)
 }

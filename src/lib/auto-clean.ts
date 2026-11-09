@@ -7,9 +7,12 @@ export type CleanResult = {
   title: string
   mainImage: string | null
   images: CleanedImage[]
+  /** HTML: judul (H1 berukuran) + semua gambar saja (tanpa teks). */
   htmlImages: string
+  /** HTML lengkap: judul (H1 berukuran) + artikel utuh bersih (teks + gambar urut asli). */
+  htmlFull: string
   contentHtml: string
-  /** Paragraf teks bersih (untuk opsi "sertakan teks" & export PDF/DOCX). */
+  /** Paragraf teks bersih (fallback untuk export PDF/DOCX). */
   textParagraphs: string[]
   sourceUrl?: string
 }
@@ -270,25 +273,27 @@ export function cleanArticle(input: {
     .filter((t) => t.length > 1)
     .slice(0, 300)
 
-  // 10. Hasil: judul DENGAN UKURAN (inline style → terbawa saat ditempel ke editor/Word) + semua gambar
+  // 10. Hasil: judul DENGAN UKURAN (inline style → terbawa saat ditempel ke editor/Word)
   const title = (article.title || '').trim() || 'Tanpa Judul'
+  const judulHtml = `<h1 style="font-size:32px;line-height:1.3;font-weight:700;margin:0 0 20px 0;">${escapeHtml(title)}</h1>`
   const imgsHtml = merged
     .map(
       (i) =>
         `<img src="${i.src}" alt="${escapeHtml(i.alt || 'Gambar artikel')}" style="max-width:100%;height:auto;display:block;margin:16px auto;" />`,
     )
     .join('\n')
-  const htmlImages =
-    `<h1 style="font-size:32px;line-height:1.3;font-weight:700;margin:0 0 20px 0;">${escapeHtml(title)}</h1>\n${imgsHtml}`
+  const htmlImages = `${judulHtml}\n${imgsHtml}`
 
-  // 11. Artikel utuh (teks + gambar) — opsional di UI
+  // 11. Artikel utuh (teks + gambar urut asli) — default hasil bersih
   const contentHtml = contentDoc.body.innerHTML.trim()
+  const htmlFull = `${judulHtml}\n${contentHtml}`
 
   return {
     title,
     mainImage,
     images: merged.slice(0, 40),
     htmlImages,
+    htmlFull,
     contentHtml,
     textParagraphs,
     sourceUrl: baseUrl,

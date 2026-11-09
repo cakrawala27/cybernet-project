@@ -47,7 +47,7 @@ export function AutoClean() {
   const [url, setUrl] = useState('')
   const [pasteMode, setPasteMode] = useState(false)
   const [html, setHtml] = useState('')
-  const [includeText, setIncludeText] = useState(false)
+  const [hanyaGambar, setHanyaGambar] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<CleanResult | null>(null)
@@ -111,7 +111,7 @@ export function AutoClean() {
     setTimeout(() => URL.revokeObjectURL(objUrl), 4000)
   }
 
-  /** Minta server bikin PDF/DOCX (gambar di-embed) lalu unduh. */
+  /** Minta server bikin PDF/DOCX (judul + artikel lengkap + semua gambar di-embed) lalu unduh. */
   const buatFile = async (kind: 'pdf' | 'docx'): Promise<{ blob: Blob; nama: string } | null> => {
     if (!result) return null
     const res = await fetch(`/api/auto-clean/export-${kind}`, {
@@ -120,7 +120,8 @@ export function AutoClean() {
       body: JSON.stringify({
         title: result.title,
         images: result.images.map((i) => i.src),
-        paragraphs: includeText ? result.textParagraphs : [],
+        paragraphs: result.textParagraphs,
+        contentHtml: hanyaGambar ? '' : result.contentHtml,
         sourceUrl: result.sourceUrl || '',
       }),
     })
@@ -205,9 +206,9 @@ export function AutoClean() {
           </h2>
           <p className="mt-4 text-zinc-400">
             Tempel link artikel dari situs lain — otomatis diambil yang bersih:{' '}
-            <span className="font-medium text-zinc-200">judul + semua gambar</span>{' '}
+            <span className="font-medium text-zinc-200">judul + isi artikel lengkap + semua gambar</span>{' '}
             (gambar utama &amp; gambar di dalam artikel), tanpa iklan, menu, dan
-            elemen sampah.
+            elemen sampah. Siap di-export ke PDF &amp; DOCX.
           </p>
         </div>
 
@@ -281,10 +282,10 @@ export function AutoClean() {
               {pasteMode ? '← pakai link URL saja' : 'situsnya diblokir? tempel HTML manual →'}
             </button>
             <div className="flex items-center gap-2">
-              <Switch id="sertakan-teks" checked={includeText} onCheckedChange={setIncludeText} />
-              <Label htmlFor="sertakan-teks" className="cursor-pointer text-xs text-zinc-400">
+              <Switch id="hanya-gambar" checked={hanyaGambar} onCheckedChange={setHanyaGambar} />
+              <Label htmlFor="hanya-gambar" className="cursor-pointer text-xs text-zinc-400">
                 <FileText className="mr-1 inline size-3.5" />
-                Sertakan teks artikel
+                Mode ringkas: judul + gambar saja
               </Label>
             </div>
           </div>
@@ -378,18 +379,51 @@ export function AutoClean() {
               </Button>
             </div>
             <p className="text-center text-[11px] text-zinc-600">
-              PDF &amp; DOCX berisi judul berukuran + semua gambar artikel (di-embed, tetap utuh
-              saat di-share ke WA/Telegram). Bagikan = kirim PDF langsung ke aplikasi chat di HP.
+              PDF &amp; DOCX berisi judul berukuran + isi artikel lengkap + semua gambar
+              (di-embed, tetap utuh saat di-share ke WA/Telegram). Bagikan = kirim PDF langsung
+              ke aplikasi chat di HP.
             </p>
+
+            {/* pratinjau artikel lengkap */}
+            <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs font-semibold uppercase tracking-widest text-zinc-500">
+                  {hanyaGambar ? 'Pratinjau Ringkas — Judul + Gambar' : 'Artikel Lengkap (Judul + Teks + Semua Gambar)'}
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => salin('html-full', hanyaGambar ? result.htmlImages : result.htmlFull)}
+                  className="shrink-0 border-zinc-700 text-xs text-zinc-300 hover:text-orange-400"
+                >
+                  {copied === 'html-full' ? (
+                    <Check className="size-3.5" />
+                  ) : (
+                    <Copy className="size-3.5" />
+                  )}
+                  Salin HTML
+                </Button>
+              </div>
+              <div
+                className="prose prose-sm prose-invert mt-4 max-h-[36rem] max-w-none overflow-y-auto text-sm leading-relaxed text-zinc-300 [&_img]:rounded-lg [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:text-zinc-100 [&_h2]:text-lg [&_h2]:font-bold [&_h2]:text-zinc-100"
+                dangerouslySetInnerHTML={{
+                  __html: hanyaGambar ? result.htmlImages : result.htmlFull,
+                }}
+              />
+            </div>
 
             {/* tombol salin massal */}
             <div className="flex flex-col gap-3 sm:flex-row">
               <Button
-                onClick={() => salin('html-img', result.htmlImages)}
+                onClick={() => salin('html-full-btn', hanyaGambar ? result.htmlImages : result.htmlFull)}
                 className="flex-1 bg-orange-500 font-semibold text-zinc-950 hover:bg-orange-400"
               >
-                {copied === 'html-img' ? <Check className="size-4" /> : <Copy className="size-4" />}
-                Salin HTML (Judul + {result.images.length} gambar)
+                {copied === 'html-full-btn' ? (
+                  <Check className="size-4" />
+                ) : (
+                  <Copy className="size-4" />
+                )}
+                Salin HTML Lengkap (Judul + Artikel + Gambar)
               </Button>
               <Button
                 onClick={() => salin('semua-img', semuaImg)}
@@ -505,30 +539,6 @@ export function AutoClean() {
                 {semuaImg}
               </pre>
             </div>
-
-            {/* teks artikel opsional */}
-            {includeText && (
-              <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5">
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-xs font-semibold uppercase tracking-widest text-zinc-500">
-                    📄 Teks Artikel (HTML bersih)
-                  </p>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => salin('teks', result.contentHtml)}
-                    className="border-zinc-700 text-xs text-zinc-300 hover:text-orange-400"
-                  >
-                    {copied === 'teks' ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-                    Salin HTML
-                  </Button>
-                </div>
-                <div
-                  className="prose prose-sm prose-invert mt-4 max-h-96 max-w-none overflow-y-auto text-sm leading-relaxed text-zinc-300 [&_img]:rounded-lg"
-                  dangerouslySetInnerHTML={{ __html: result.contentHtml }}
-                />
-              </div>
-            )}
 
             {result.sourceUrl && (
               <p className="text-center text-[11px] text-zinc-600">

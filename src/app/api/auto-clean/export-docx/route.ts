@@ -1,5 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { fetchAllImages, slugify, type ExportBody } from '@/lib/export-images'
+import {
+  fetchAllImages,
+  parseContentHtml,
+  imgKeyPath,
+  slugify,
+  type ExportBody,
+  type ImageAsset,
+} from '@/lib/export-images'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -21,34 +28,85 @@ export async function POST(req: NextRequest) {
     const title = (body.title || 'Artikel').trim().slice(0, 300)
     const images = (body.images || []).filter((s) => /^https?:\/\//i.test(s)).slice(0, 30)
     const paragraphs = (body.paragraphs || []).slice(0, 300)
+    const contentHtml = (body.contentHtml || '').slice(0, 400_000)
     const sourceUrl = (body.sourceUrl || '').trim()
 
-    // 1. Sedot gambar → JPEG base64 (data URI) supaya DOCX tetap utuh saat di-share,
-    //    tanpa bergantung hotlink situs asal.
-    const assets = await fetchAllImages(images, DOCX_IMG_W, 30, 74)
+    // 1. Artikel bersih → urutan item alami (subjudul / paragraf / gambar urut asli)
+    const items = parseContentHtml(contentHtml, title)
 
-    // 2. Rakit HTML bersih: Judul (ukuran H1 besar) + teks opsional + semua gambar
+    // 2. Kumpulkan semua URL gambar (utama + dalam artikel, dedupe)
+    const imgUrls: string[] = []
+    const pushUrl = (u: string) => {
+      if (!imgUrls.some((x) => imgKeyPath(x) === imgKeyPath(u))) imgUrls.push(u)
+    }
+    for (const it of items) if (it.type === 'img') pushUrl(it.src)
+    for (const u of images) pushUrl(u)
+
+    // 3. Sedot gambar → JPEG base64 (data URI) supaya DOCX tetap utuh saat di-share
+    const assets = await fetchAllImages(imgUrls, DOCX_IMG_W, 32, 74)
+    const byKey = new Map<string, ImageAsset>()
+    for (const a of assets) byKey.set(imgKeyPath(a.url), a)
+    const pakaiAsset = (src: string): ImageAsset | null => byKey.get(imgKeyPath(src)) || null
+
+    // 4. Rakit HTML: judul besar + gambar utama + isi artikel urut asli + sisa gambar
     const parts: string[] = []
     parts.push(
       `<h1 style="font-size: 32px; font-weight: bold; line-height: 1.3; margin: 0 0 16px 0;">${escapeHtml(title)}</h1>`,
     )
     if (sourceUrl) {
       parts.push(
-        `<p style="font-size: 9pt; color: #888888; margin: 0 0 24px 0;">Sumber: ${escapeHtml(sourceUrl)}</p>`,
+        `<p style="font-size: 9pt; color: #888888; margin: 0 0 20px 0;">Sumber: ${escapeHtml(sourceUrl)}</p>`,
       )
     }
-    if (paragraphs.length > 0) {
-      for (const p of paragraphs) {
-        parts.push(`<p style="font-size: 11pt; line-height: 1.5; margin: 0 0 12px 0;">${escapeHtml(p)}</p>`)
+
+    const terpakai = new Set<string>()
+    const imgHtml = (src: string): string | null => {
+      const asset = pakaiAsset(src)
+      if (!asset || terpakai.has(imgKeyPath(asset.url))) return null
+      terpakai.add(imgKeyPath(asset.url))
+      return `<img src="data:image/jpeg;base64,${asset.buffer.toString('base64')}" alt="Gambar artikel" />`
+    }
+
+    // gambar utama tepat di bawah judul
+    if (images[0]) {
+      const html = imgHtml(images[0])
+      if (html) parts.push(html)
+    }
+
+    const adaIsi = items.some((it) => it.type === 'h' || it.type === 'p')
+    for (const it of items) {
+      if (it.type === 'h') {
+        parts.push(
+          `<h2 style="font-size: 15pt; font-weight: bold; margin: 18px 0 8px 0;">${escapeHtml(it.text)}</h2>`,
+        )
+      } else if (it.type === 'p') {
+        parts.push(
+          `<p style="font-size: 11pt; line-height: 1.5; margin: 0 0 12px 0;">${escapeHtml(it.text)}</p>`,
+        )
+      } else {
+        const html = imgHtml(it.src)
+        if (html) parts.push(html)
       }
     }
-    for (const img of assets) {
-      const dataUri = `data:image/jpeg;base64,${img.buffer.toString('base64')}`
-      parts.push(`<img src="${dataUri}" alt="Gambar artikel" />`)
+
+    // fallback: konten tak terstruktur → paragraf polos
+    if (!adaIsi && paragraphs.length > 0) {
+      for (const p of paragraphs) {
+        parts.push(
+          `<p style="font-size: 11pt; line-height: 1.5; margin: 0 0 12px 0;">${escapeHtml(p)}</p>`,
+        )
+      }
     }
+
+    // gambar yang belum terpakai → taruh di akhir
+    for (const u of images) {
+      const html = imgHtml(u)
+      if (html) parts.push(html)
+    }
+
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8" /><title>${escapeHtml(title)}</title></head><body>${parts.join('\n')}</body></html>`
 
-    // 3. HTML → DOCX
+    // 5. HTML → DOCX
     const { default: HTMLtoDOCX } = await import('html-to-docx')
     const docxBuf = await HTMLtoDOCX(html, null, {
       title,
