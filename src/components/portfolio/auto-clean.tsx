@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Check,
   Copy,
@@ -54,6 +54,23 @@ export function AutoClean() {
   const [copied, setCopied] = useState<string | null>(null)
   const [exporting, setExporting] = useState<'pdf' | 'docx' | 'share' | null>(null)
   const [pdfFile, setPdfFile] = useState<{ blob: Blob; nama: string } | null>(null)
+
+  // Auto-scroll: hasil & error muncul DI BAWAH form — di HP bisa di luar layar,
+  // jadi geser layar otomatis ke situ begitu proses selesai.
+  const hasilRef = useRef<HTMLDivElement>(null)
+  const errorRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (result && !loading) {
+      hasilRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [result])
+  useEffect(() => {
+    if (error && !loading) {
+      errorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [error])
 
   const slugify = (s: string) =>
     s
@@ -293,7 +310,10 @@ export function AutoClean() {
 
         {/* error */}
         {error && (
-          <div className="mx-auto mt-6 max-w-3xl rounded-xl border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-300">
+          <div
+            ref={errorRef}
+            className="mx-auto mt-6 max-w-3xl scroll-mt-24 rounded-xl border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-300"
+          >
             <p className="font-semibold">Gagal memproses</p>
             <p className="mt-1 text-red-300/90">{error}</p>
           </div>
@@ -301,7 +321,10 @@ export function AutoClean() {
 
         {/* hasil */}
         {result && (
-          <div className="mx-auto mt-8 max-w-3xl space-y-6">
+          <div
+            ref={hasilRef}
+            className="mx-auto mt-8 max-w-3xl scroll-mt-20 space-y-6"
+          >
             {/* judul */}
             <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5">
               <div className="flex items-start justify-between gap-3">
