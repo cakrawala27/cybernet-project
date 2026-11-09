@@ -3,6 +3,7 @@ import { Hero } from '@/components/portfolio/hero'
 import { Services } from '@/components/portfolio/services'
 import { Portfolio } from '@/components/portfolio/portfolio'
 import { DemoSection } from '@/components/portfolio/demo'
+import { AutoClean } from '@/components/portfolio/auto-clean'
 import { Pricing } from '@/components/portfolio/pricing'
 import { Testimonials } from '@/components/portfolio/testimonials'
 import { Faq } from '@/components/portfolio/faq'
@@ -27,6 +28,7 @@ export default function Home() {
         <Services />
         <Portfolio />
         <DemoSection />
+        <AutoClean />
         <Pricing />
         <Testimonials />
         <Faq />

@@ -16,6 +16,7 @@ const links = [
   { href: '#layanan', label: 'Layanan' },
   { href: '#portofolio', label: 'Portofolio' },
   { href: '#demo', label: 'Demo' },
+  { href: '#auto-clean', label: 'Auto Clean' },
   { href: '#harga', label: 'Harga' },
   { href: '#faq', label: 'FAQ' },
   { href: '#kontak', label: 'Kontak' },
