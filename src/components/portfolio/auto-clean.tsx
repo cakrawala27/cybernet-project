@@ -137,7 +137,7 @@ export function AutoClean() {
       body: JSON.stringify({
         title: result.title,
         images: result.images.map((i) => i.src),
-        paragraphs: result.textParagraphs,
+        paragraphs: hanyaGambar ? [] : result.textParagraphs,
         contentHtml: hanyaGambar ? '' : result.contentHtml,
         sourceUrl: result.sourceUrl || '',
       }),
@@ -402,9 +402,9 @@ export function AutoClean() {
               </Button>
             </div>
             <p className="text-center text-[11px] text-zinc-600">
-              PDF &amp; DOCX berisi judul berukuran + isi artikel lengkap + semua gambar
-              (di-embed, tetap utuh saat di-share ke WA/Telegram). Bagikan = kirim PDF langsung
-              ke aplikasi chat di HP.
+              PDF &amp; DOCX berisi judul berukuran + isi artikel lengkap dengan gambar tepat di
+              posisi aslinya (di-embed, tetap utuh saat di-share ke WA/Telegram) — thumbnail
+              artikel lain tidak ikut kebawa. Bagikan = kirim PDF langsung ke aplikasi chat di HP.
             </p>
 
             {/* pratinjau artikel lengkap */}

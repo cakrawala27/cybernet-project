@@ -34,16 +34,21 @@ export async function POST(req: NextRequest) {
     // 1. Artikel bersih → urutan item alami (subjudul / paragraf / gambar urut asli)
     const items = parseContentHtml(contentHtml, title)
 
-    // 2. Kumpulkan semua URL gambar (utama + dalam artikel, dedupe)
+    // 2. URL gambar yang di-embed — BIAR RAPI:
+    //    - artikel terstruktur: HANYA gambar di dalam isi artikel + gambar utama
+    //      kalau belum muncul di isi (ditaruh di bawah judul)
+    //    - mode ringkas/fallback: daftar gambar hasil scrape (tanpa teks)
+    const structured = items.length > 0
     const imgUrls: string[] = []
     const pushUrl = (u: string) => {
       if (!imgUrls.some((x) => imgKeyPath(x) === imgKeyPath(u))) imgUrls.push(u)
     }
     for (const it of items) if (it.type === 'img') pushUrl(it.src)
-    for (const u of images) pushUrl(u)
+    if (images[0]) pushUrl(images[0])
+    if (!structured) for (const u of images) pushUrl(u)
 
     // 3. Sedot gambar → JPEG base64 (data URI) supaya DOCX tetap utuh saat di-share
-    const assets = await fetchAllImages(imgUrls, DOCX_IMG_W, 32, 74)
+    const assets = await fetchAllImages(imgUrls, DOCX_IMG_W, structured ? 20 : 30, 74)
     const byKey = new Map<string, ImageAsset>()
     for (const a of assets) byKey.set(imgKeyPath(a.url), a)
     const pakaiAsset = (src: string): ImageAsset | null => byKey.get(imgKeyPath(src)) || null
@@ -67,13 +72,19 @@ export async function POST(req: NextRequest) {
       return `<img src="data:image/jpeg;base64,${asset.buffer.toString('base64')}" alt="Gambar artikel" />`
     }
 
-    // gambar utama tepat di bawah judul
+    // gambar utama tepat di bawah judul — hanya kalau belum ada di isi artikel
     if (images[0]) {
-      const html = imgHtml(images[0])
-      if (html) parts.push(html)
+      const mainKey = imgKeyPath(images[0])
+      const sudahDiisi = items.some(
+        (it) => it.type === 'img' && imgKeyPath(it.src) === mainKey,
+      )
+      if (!sudahDiisi) {
+        const html = imgHtml(images[0])
+        if (html) parts.push(html)
+      }
     }
 
-    const adaIsi = items.some((it) => it.type === 'h' || it.type === 'p')
+    // isi artikel mengikuti urutan asli; sisa gambar TIDAK ditambahkan
     for (const it of items) {
       if (it.type === 'h') {
         parts.push(
@@ -89,19 +100,19 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // fallback: konten tak terstruktur → paragraf polos
-    if (!adaIsi && paragraphs.length > 0) {
+    // fallback (konten tak terstruktur / mode ringkas): teks dulu, lalu gambar
+    if (!structured && paragraphs.length > 0) {
       for (const p of paragraphs) {
         parts.push(
           `<p style="font-size: 11pt; line-height: 1.5; margin: 0 0 12px 0;">${escapeHtml(p)}</p>`,
         )
       }
     }
-
-    // gambar yang belum terpakai → taruh di akhir
-    for (const u of images) {
-      const html = imgHtml(u)
-      if (html) parts.push(html)
+    if (!structured) {
+      for (const u of images) {
+        const html = imgHtml(u)
+        if (html) parts.push(html)
+      }
     }
 
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8" /><title>${escapeHtml(title)}</title></head><body>${parts.join('\n')}</body></html>`

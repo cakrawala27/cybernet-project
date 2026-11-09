@@ -35,54 +35,67 @@ export async function POST(req: NextRequest) {
     // 1. Ubah artikel bersih → urutan item alami (subjudul / paragraf / gambar)
     const items = parseContentHtml(contentHtml, title)
 
-    // 2. Kumpulkan semua URL gambar yang harus di-embed (utama + dalam artikel, dedupe)
+    // 2. URL gambar yang di-embed — BIAR RAPI:
+    //    - artikel terstruktur: HANYA gambar yang ada di dalam isi artikel (urut asli)
+    //      + gambar utama kalau belum muncul di isi (ditaruh di bawah judul)
+    //    - mode ringkas/fallback: daftar gambar hasil scrape (tanpa teks)
+    const structured = items.length > 0
     const imgUrls: string[] = []
     const pushUrl = (u: string) => {
       if (!imgUrls.some((x) => imgKeyPath(x) === imgKeyPath(u))) imgUrls.push(u)
     }
     for (const it of items) if (it.type === 'img') pushUrl(it.src)
-    for (const u of images) pushUrl(u)
+    if (images[0]) pushUrl(images[0])
+    if (!structured) for (const u of images) pushUrl(u)
 
     // 3. Sedot semua gambar server-side → di-embed (PDF tetap utuh saat di-share)
-    const assets = await fetchAllImages(imgUrls, 1200, 32, 72)
+    const assets = await fetchAllImages(imgUrls, 1200, structured ? 20 : 30, 72)
     const byKey = new Map<string, ImageAsset>()
     for (const a of assets) byKey.set(imgKeyPath(a.url), a)
     const pakaiAsset = (src: string): ImageAsset | null => byKey.get(imgKeyPath(src)) || null
 
-    // 4. Susun urutan render: gambar utama dulu, lalu isi artikel, sisanya gambar belum terpakai
+    // 4. Urutan render mengikuti artikel asli. Gambar utama di bawah judul hanya
+    //    kalau belum ada di isi. SISANYA DIBUANG — thumbnail artikel lain tidak ikut.
     const render: RenderItem[] = []
     const terpakai = new Set<string>()
 
-    const mainAsset = images[0] ? pakaiAsset(images[0]) : null
-    if (mainAsset) {
-      render.push({ type: 'img', asset: mainAsset })
-      terpakai.add(imgKeyPath(mainAsset.url))
+    if (images[0]) {
+      const mainKey = imgKeyPath(images[0])
+      const sudahDiisi = items.some(
+        (it) => it.type === 'img' && imgKeyPath(it.src) === mainKey,
+      )
+      const mainAsset = pakaiAsset(images[0])
+      if (mainAsset && !sudahDiisi) {
+        render.push({ type: 'img', asset: mainAsset })
+        terpakai.add(mainKey)
+      }
     }
 
-    const adaIsi = items.some((it) => it.type === 'h' || it.type === 'p')
     for (const it of items) {
       if (it.type === 'h') render.push({ type: 'h', text: it.text })
       else if (it.type === 'p') render.push({ type: 'p', text: it.text })
       else {
+        const key = imgKeyPath(it.src)
         const asset = pakaiAsset(it.src)
-        if (asset && !terpakai.has(imgKeyPath(asset.url))) {
+        if (asset && !terpakai.has(key)) {
           render.push({ type: 'img', asset })
-          terpakai.add(imgKeyPath(asset.url))
+          terpakai.add(key)
         }
       }
     }
 
-    // fallback: konten tak terstruktur → paragraf polos
-    if (!adaIsi && paragraphs.length > 0) {
+    // fallback (konten tak terstruktur / mode ringkas): teks dulu, lalu gambar
+    if (!structured && paragraphs.length > 0) {
       for (const p of paragraphs) render.push({ type: 'p', text: p })
     }
-
-    // gambar yang belum terpakai (mis. gambar utama berbeda dari konten) → taruh di akhir
-    for (const u of images) {
-      const asset = pakaiAsset(u)
-      if (asset && !terpakai.has(imgKeyPath(asset.url))) {
-        render.push({ type: 'img', asset })
-        terpakai.add(imgKeyPath(asset.url))
+    if (!structured) {
+      for (const u of images) {
+        const key = imgKeyPath(u)
+        const asset = pakaiAsset(u)
+        if (asset && !terpakai.has(key)) {
+          render.push({ type: 'img', asset })
+          terpakai.add(key)
+        }
       }
     }
 
@@ -127,7 +140,8 @@ export async function POST(req: NextRequest) {
       if (item.type === 'img') {
         const img = item.asset
         const maxH = PAGE_H - MARGIN * 2
-        const scale = Math.min(CONTENT_W / img.width, maxH / img.height)
+        // jangan perbesar gambar kecil (biar tajam & rapi) — pas lebar konten saja
+        const scale = Math.min(CONTENT_W / img.width, maxH / img.height, 1)
         const drawW = img.width * scale
         const drawH = img.height * scale
         if (y + drawH + 16 > PAGE_H - MARGIN) {
